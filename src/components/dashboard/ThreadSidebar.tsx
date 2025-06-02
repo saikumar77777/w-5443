@@ -11,15 +11,11 @@ const ThreadSidebar: React.FC = () => {
   const { messages, selectedThread, setSelectedThread } = useMessages();
   const [inputText, setInputText] = useState('');
   
-  // Auto-close thread when input is empty and user clicks away
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      // If there's no input text and the click is outside the thread sidebar
       if (inputText === '' && selectedThread) {
-        // Check if the click is outside the thread sidebar
         const threadSidebar = document.querySelector('.thread-sidebar');
         if (threadSidebar && !threadSidebar.contains(e.target as Node)) {
-          // Close the thread
           setSelectedThread(null);
         }
       }
@@ -54,7 +50,6 @@ const ThreadSidebar: React.FC = () => {
             variant="ghost"
             size="sm"
             onClick={() => {
-              // Get all messages in the thread
               const threadMessages = [parentMessage, ...(parentMessage.replies || [])];
               downloadMeetingNotes(threadMessages, `Thread in ${selectedThread.channelId}`);
             }}

@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { User, AuthError } from '@supabase/supabase-js';
@@ -23,11 +22,20 @@ export interface Workspace {
   created_at: string;
   updated_at: string;
   url?: string; // For compatibility with existing components
+  icon?: string; // Add icon property for compatibility
 }
 
-// Extend User type to include displayName for compatibility
+// Extend User type to include displayName and other properties for compatibility
 export interface ExtendedUser extends User {
   displayName?: string;
+  status?: {
+    text?: string;
+    emoji?: string;
+  };
+  presence?: 'active' | 'away' | 'offline' | 'dnd';
+  avatar?: string;
+  role?: string;
+  timezone?: string;
 }
 
 interface AuthContextType {
@@ -41,6 +49,9 @@ interface AuthContextType {
   logout: () => Promise<void>;
   updateProfile: (updates: Partial<Profile>) => Promise<void>;
   setCurrentWorkspace: (workspace: Workspace | null) => void;
+  setWorkspace: (workspace: Workspace | null) => void;
+  updateUserStatus: (status: { text?: string; emoji?: string }) => void;
+  updateUserPresence: (presence: 'active' | 'away' | 'offline' | 'dnd') => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -55,9 +66,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-        const extendedUser = {
+        const extendedUser: ExtendedUser = {
           ...session.user,
-          displayName: session.user.user_metadata?.username || session.user.email?.split('@')[0] || 'Unknown User'
+          displayName: session.user.user_metadata?.username || session.user.email?.split('@')[0] || 'Unknown User',
+          status: { text: '', emoji: '😀' },
+          presence: 'active',
+          avatar: session.user.user_metadata?.avatar_url,
+          role: 'Member',
+          timezone: 'UTC'
         };
         setUser(extendedUser);
         loadProfile(session.user.id);
@@ -70,9 +86,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
-        const extendedUser = {
+        const extendedUser: ExtendedUser = {
           ...session.user,
-          displayName: session.user.user_metadata?.username || session.user.email?.split('@')[0] || 'Unknown User'
+          displayName: session.user.user_metadata?.username || session.user.email?.split('@')[0] || 'Unknown User',
+          status: { text: '', emoji: '😀' },
+          presence: 'active',
+          avatar: session.user.user_metadata?.avatar_url,
+          role: 'Member',
+          timezone: 'UTC'
         };
         setUser(extendedUser);
         await loadProfile(session.user.id);
@@ -121,7 +142,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const workspace = workspaceData[0].workspaces as any;
         setWorkspace({
           ...workspace,
-          url: workspace.slug // Add url property for compatibility
+          url: workspace.slug, // Add url property for compatibility
+          icon: workspace.name?.charAt(0)?.toUpperCase() || 'W' // Add icon property
         });
       }
     } catch (error) {
@@ -182,6 +204,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setWorkspace(newWorkspace);
   };
 
+  const updateUserStatus = (status: { text?: string; emoji?: string }) => {
+    setUser(prev => prev ? { ...prev, status } : null);
+  };
+
+  const updateUserPresence = (presence: 'active' | 'away' | 'offline' | 'dnd') => {
+    setUser(prev => prev ? { ...prev, presence } : null);
+  };
+
   const value = {
     user,
     profile,
@@ -193,6 +223,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     logout,
     updateProfile,
     setCurrentWorkspace,
+    setWorkspace: setCurrentWorkspace,
+    updateUserStatus,
+    updateUserPresence,
   };
 
   return (

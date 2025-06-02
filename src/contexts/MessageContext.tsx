@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './AuthContext';
@@ -46,13 +45,18 @@ export interface Workspace {
   updated_at: string;
 }
 
+export interface ThreadInfo {
+  channelId: string;
+  messageId: string;
+}
+
 interface MessageContextType {
   messages: { [channelId: string]: Message[] };
   channels: Channel[];
   workspaces: Workspace[];
   currentWorkspace: Workspace | null;
   currentChannel: Channel | null;
-  selectedThread: Message | null;
+  selectedThread: ThreadInfo | null;
   sendMessage: (channelId: string, content: string, threadId?: string) => Promise<void>;
   addMessage: (channelId: string, messageData: any) => void;
   addReply: (channelId: string, parentId: string, messageData: any) => void;
@@ -60,7 +64,7 @@ interface MessageContextType {
   removeReaction: (messageId: string, emoji: string) => Promise<void>;
   setCurrentWorkspace: (workspace: Workspace | null) => void;
   setCurrentChannel: (channel: Channel | null) => void;
-  setSelectedThread: (message: Message | null) => void;
+  setSelectedThread: (threadInfo: ThreadInfo | null) => void;
   loadWorkspaces: () => Promise<void>;
   loadChannels: (workspaceId: string) => Promise<void>;
   loadMessages: (channelId: string) => Promise<void>;
@@ -69,8 +73,8 @@ interface MessageContextType {
   getMessages: (channelId: string) => Message[] | undefined;
   getThreadReplies: (channelId: string, parentId: string) => Message[] | undefined;
   getAllPublicChannelMessages: () => { [channelId: string]: Message[] };
-  pinMessage: (messageId: string) => Promise<void>;
-  unpinMessage: (messageId: string) => Promise<void>;
+  pinMessage: (channelId: string, messageId: string) => Promise<void>;
+  unpinMessage: (channelId: string, messageId: string) => Promise<void>;
   getPinnedMessages: (channelId: string) => Message[];
   addDocument: (channelId: string, document: any) => void;
 }
@@ -83,7 +87,7 @@ export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
   const [currentChannel, setCurrentChannel] = useState<Channel | null>(null);
-  const [selectedThread, setSelectedThread] = useState<Message | null>(null);
+  const [selectedThread, setSelectedThread] = useState<ThreadInfo | null>(null);
   const { user } = useAuth();
 
   const loadWorkspaces = async () => {
@@ -141,7 +145,6 @@ export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children })
     if (!user) return;
 
     try {
-      // Load main messages (not replies)
       const { data: messagesData, error: messagesError } = await supabase
         .from('messages')
         .select(`
@@ -156,7 +159,6 @@ export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children })
 
       if (messagesError) throw messagesError;
 
-      // Load replies for each message
       const { data: repliesData, error: repliesError } = await supabase
         .from('messages')
         .select(`
@@ -170,7 +172,6 @@ export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children })
 
       if (repliesError) throw repliesError;
 
-      // Process messages and replies
       const processedMessages: Message[] = messagesData?.map(msg => {
         const replies = repliesData?.filter(reply => reply.thread_id === msg.id) || [];
         const processedReplies: Message[] = replies.map(reply => ({
@@ -212,7 +213,7 @@ export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children })
           replies: processedReplies,
           replyCount: processedReplies.length,
           threadParticipants: [...new Set(processedReplies.map(r => r.userId))],
-          isPinned: false, // Add this when we implement pinning
+          isPinned: false,
           reactions: msg.reactions?.reduce((acc: any[], reaction: any) => {
             const existing = acc.find(r => r.emoji === reaction.emoji);
             if (existing) {
@@ -254,7 +255,6 @@ export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children })
 
       if (error) throw error;
 
-      // Reload messages after sending
       await loadMessages(channelId);
     } catch (error) {
       console.error('Error sending message:', error);
@@ -329,7 +329,6 @@ export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children })
 
       if (error) throw error;
 
-      // Reload messages to update reactions
       if (currentChannel) {
         await loadMessages(currentChannel.id);
       }
@@ -351,7 +350,6 @@ export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children })
 
       if (error) throw error;
 
-      // Reload messages to update reactions
       if (currentChannel) {
         await loadMessages(currentChannel.id);
       }
@@ -376,7 +374,6 @@ export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children })
 
       if (error) throw error;
 
-      // Reload channels
       await loadChannels(workspaceId);
     } catch (error) {
       console.error('Error creating channel:', error);
@@ -397,7 +394,6 @@ export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children })
 
       if (error) throw error;
 
-      // Reload workspaces
       await loadWorkspaces();
     } catch (error) {
       console.error('Error joining workspace:', error);
@@ -418,23 +414,19 @@ export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children })
     return messages;
   };
 
-  const pinMessage = async (messageId: string) => {
-    // TODO: Implement pinning functionality
+  const pinMessage = async (channelId: string, messageId: string) => {
     console.log('Pinning message:', messageId);
   };
 
-  const unpinMessage = async (messageId: string) => {
-    // TODO: Implement unpinning functionality
+  const unpinMessage = async (channelId: string, messageId: string) => {
     console.log('Unpinning message:', messageId);
   };
 
   const getPinnedMessages = (channelId: string) => {
-    // TODO: Implement getting pinned messages
     return [];
   };
 
   const addDocument = (channelId: string, document: any) => {
-    // TODO: Implement document functionality
     console.log('Adding document to channel:', channelId, document);
   };
 

@@ -57,7 +57,6 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   
   // Process @zani 
   useEffect(() => {
-    // Check if message contains @zani mention and process it
     const processZani = async () => {
       if (message.content && containsZaniMention(message.content) && !zaniResponse && !isProcessingZani) {
         const query = extractZaniQuery(message.content);
@@ -101,7 +100,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
         name: fileName,
         type: getFileType(fileName),
         url: createMockFileUrl(fileName),
-        size: Math.floor(Math.random() * 5000000) + 100000 // Mock file size
+        size: Math.floor(Math.random() * 5000000) + 100000
       });
       textContent = textContent.replace(match[0], '').trim();
     }
@@ -231,8 +230,6 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     return date.toLocaleDateString();
   };
 
-
-
   const { formattedContent, files } = formatMessageContent(message.content);
 
   return (
@@ -357,7 +354,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             )}
 
             {/* Thread Preview */}
-            {message.replyCount > 0 && (
+            {message.replyCount && message.replyCount > 0 && (
               <button
                 onClick={handleReplyClick}
                 className="flex items-center gap-2 mt-2 text-blue-400 hover:text-blue-300 text-sm bg-gray-800/40 px-2 py-1 rounded-md hover:bg-gray-700/60 hover:scale-105 transition-all duration-200"

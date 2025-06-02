@@ -1,18 +1,7 @@
 
-import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { addMockThreadsToChannels } from '@/utils/mockThreadData';
-import { addTeamConversation } from '@/utils/mockTeamConversation';
-
-export interface Document {
-  id: string;
-  title: string;
-  content: string;
-  type: string;
-  size: number;
-  uploadedBy: string;
-  uploadedAt: Date;
-  isPinned: boolean;
-}
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from './AuthContext';
 
 export interface Message {
   id: string;
@@ -21,478 +10,429 @@ export interface Message {
   username: string;
   avatar?: string;
   content: string;
-  timestamp: Date;
-  edited?: boolean;
-  editedAt?: Date;
-  reactions: { emoji: string; users: string[]; count: number }[];
-  replies: Message[];
-  replyCount: number;
-  threadParticipants: string[];
-  isPinned?: boolean;
+  timestamp: string;
+  reactions?: Array<{
+    emoji: string;
+    users: string[];
+    count: number;
+  }>;
+  replies?: Message[];
+  replyCount?: number;
+  threadParticipants?: string[];
+  edited_at?: string;
 }
 
-export interface MessageContextType {
+export interface Channel {
+  id: string;
+  name: string;
+  description?: string;
+  type: 'public' | 'private' | 'direct';
+  workspace_id: string;
+  created_by?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  logo_url?: string;
+  owner_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface MessageContextType {
   messages: { [channelId: string]: Message[] };
-  documents: { [channelId: string]: Document[] };
-  addMessage: (channelId: string, message: Omit<Message, 'id' | 'timestamp' | 'reactions' | 'replies' | 'replyCount'>) => void;
-  addReply: (channelId: string, parentMessageId: string, reply: Omit<Message, 'id' | 'timestamp' | 'reactions' | 'replies' | 'replyCount'>) => void;
-  getMessages: (channelId: string) => Message[] | undefined;
-  getAllPublicChannelMessages: () => { [channelId: string]: Message[] };
-  getThreadReplies: (channelId: string, parentMessageId: string) => Message[];
-  addMockThreads: () => { success: boolean; message: string };
-  loadMessagesFromLocalStorage: () => { [channelId: string]: Message[] };
-  addTeamConversationData: () => { success: boolean; message: string };
-  selectedThread: { channelId: string; messageId: string } | null;
-  setSelectedThread: React.Dispatch<React.SetStateAction<{ channelId: string; messageId: string } | null>>;
-  pinMessage: (channelId: string, messageId: string) => void;
-  unpinMessage: (channelId: string, messageId: string) => void;
-  getPinnedMessages: (channelId: string) => Message[];
-  addDocument: (channelId: string, document: Omit<Document, 'id'>) => void;
-  getDocuments: (channelId: string) => Document[];
-  getPinnedDocuments: (channelId: string) => Document[];
-  pinDocument: (channelId: string, documentId: string) => void;
-  unpinDocument: (channelId: string, documentId: string) => void;
-  isPrivateChannel: (channelId: string) => boolean;
+  channels: Channel[];
+  workspaces: Workspace[];
+  currentWorkspace: Workspace | null;
+  currentChannel: Channel | null;
+  sendMessage: (channelId: string, content: string, threadId?: string) => Promise<void>;
+  addReaction: (messageId: string, emoji: string) => Promise<void>;
+  removeReaction: (messageId: string, emoji: string) => Promise<void>;
+  setCurrentWorkspace: (workspace: Workspace | null) => void;
+  setCurrentChannel: (channel: Channel | null) => void;
+  loadWorkspaces: () => Promise<void>;
+  loadChannels: (workspaceId: string) => Promise<void>;
+  loadMessages: (channelId: string) => Promise<void>;
+  createChannel: (workspaceId: string, name: string, description?: string, type?: 'public' | 'private') => Promise<void>;
+  joinWorkspace: (workspaceId: string) => Promise<void>;
 }
 
 const MessageContext = createContext<MessageContextType | undefined>(undefined);
 
-export const useMessages = () => {
-  const context = useContext(MessageContext);
-  if (!context) {
-    throw new Error('useMessages must be used within a MessageProvider');
-  }
-  return context;
-};
-
 export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // Initialize messages from localStorage
-  const [messages, setMessages] = useState<{ [channelId: string]: Message[] }>(() => {
-    try {
-      // Check for messages in localStorage for the current workspace
-      // Try to load messages from Test01 workspace (id: 3)
-      const savedMessages = localStorage.getItem('messages_3');
-      if (savedMessages) {
-        const parsedMessages = JSON.parse(savedMessages);
-        // Convert string timestamps back to Date objects
-        Object.keys(parsedMessages).forEach(channelId => {
-          parsedMessages[channelId] = parsedMessages[channelId].map((msg: any) => ({
-            ...msg,
-            timestamp: new Date(msg.timestamp),
-            replies: (msg.replies || []).map((reply: any) => ({
-              ...reply,
-              timestamp: new Date(reply.timestamp)
-            }))
-          }));
-        });
-        return parsedMessages;
-      }
-    } catch (error) {
-      console.error('Error loading messages from localStorage:', error);
-    }
-    return {};
-  });
-  
-  const [selectedThread, setSelectedThread] = useState<{ channelId: string; messageId: string } | null>(null);
-  
-  // Initialize documents state
-  const [documents, setDocuments] = useState<{ [channelId: string]: Document[] }>(() => {
-    try {
-      const savedDocuments = localStorage.getItem('documents_3');
-      if (savedDocuments) {
-        const parsedDocuments = JSON.parse(savedDocuments);
-        // Convert string timestamps back to Date objects
-        Object.keys(parsedDocuments).forEach(channelId => {
-          parsedDocuments[channelId] = parsedDocuments[channelId].map((doc: any) => ({
-            ...doc,
-            uploadedAt: new Date(doc.uploadedAt)
-          }));
-        });
-        return parsedDocuments;
-      }
-    } catch (error) {
-      console.error('Error loading documents from localStorage:', error);
-    }
-    return {};
-  });
+  const [messages, setMessages] = useState<{ [channelId: string]: Message[] }>({});
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
+  const [currentChannel, setCurrentChannel] = useState<Channel | null>(null);
+  const { user } = useAuth();
 
-  // Helper function to save messages to localStorage
-  const saveMessagesToLocalStorage = (updatedMessages: { [channelId: string]: Message[] }) => {
+  const loadWorkspaces = async () => {
+    if (!user) return;
+
     try {
-      localStorage.setItem('messages_3', JSON.stringify(updatedMessages));
+      const { data: workspaceMembers, error } = await supabase
+        .from('workspace_members')
+        .select(`
+          workspace_id,
+          workspaces (
+            id,
+            name,
+            slug,
+            description,
+            logo_url,
+            owner_id,
+            created_at,
+            updated_at
+          )
+        `)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      const workspaceData = workspaceMembers
+        ?.map(member => member.workspaces)
+        .filter(Boolean) as Workspace[];
+
+      setWorkspaces(workspaceData || []);
     } catch (error) {
-      console.error('Error saving messages to localStorage:', error);
-    }
-  };
-  
-  // Helper function to save documents to localStorage
-  const saveDocumentsToLocalStorage = (updatedDocuments: { [channelId: string]: Document[] }) => {
-    try {
-      localStorage.setItem('documents_3', JSON.stringify(updatedDocuments));
-    } catch (error) {
-      console.error('Error saving documents to localStorage:', error);
+      console.error('Error loading workspaces:', error);
     }
   };
 
-  // Load messages from localStorage
-  const loadMessagesFromLocalStorage = (): { [channelId: string]: Message[] } => {
+  const loadChannels = async (workspaceId: string) => {
+    if (!user) return;
+
     try {
-      const savedMessages = localStorage.getItem('messages_3');
-      if (savedMessages) {
-        return JSON.parse(savedMessages);
-      }
+      const { data, error } = await supabase
+        .from('channels')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .order('created_at');
+
+      if (error) throw error;
+
+      setChannels(data || []);
     } catch (error) {
-      console.error('Error loading messages from localStorage:', error);
+      console.error('Error loading channels:', error);
     }
-    return {};
   };
 
-  const addMessage = (channelId: string, messageData: Omit<Message, 'id' | 'timestamp' | 'reactions' | 'replies' | 'replyCount' | 'threadParticipants'>) => {
-    const newMessage: Message = {
-      ...messageData,
-      id: `msg-${Date.now()}-${Math.random()}`,
-      timestamp: new Date(),
-      reactions: [],
-      replies: [],
-      replyCount: 0,
-      threadParticipants: []
-    };
+  const loadMessages = async (channelId: string) => {
+    if (!user) return;
 
-    setMessages(prev => {
-      const updatedMessages = {
-        ...prev,
-        [channelId]: [...(prev[channelId] || []), newMessage]
-      };
-      saveMessagesToLocalStorage(updatedMessages);
-      return updatedMessages;
-    });
-  };
+    try {
+      // Load main messages (not replies)
+      const { data: messagesData, error: messagesError } = await supabase
+        .from('messages')
+        .select(`
+          *,
+          profiles (username, avatar_url),
+          reactions (*),
+          message_attachments (*)
+        `)
+        .eq('channel_id', channelId)
+        .is('thread_id', null)
+        .order('created_at');
 
-  const addReply = (channelId: string, messageId: string, replyData: Omit<Message, 'id' | 'timestamp' | 'reactions' | 'replies' | 'replyCount' | 'threadParticipants'>) => {
-    const reply: Message = {
-      ...replyData,
-      id: `reply-${Date.now()}-${Math.random()}`,
-      timestamp: new Date(),
-      reactions: [],
-      replies: [],
-      replyCount: 0,
-      threadParticipants: []
-    };
+      if (messagesError) throw messagesError;
 
-    setMessages(prev => {
-      const channelMessages = prev[channelId] || [];
-      const updatedMessages = {
-        ...prev,
-        [channelId]: channelMessages.map(msg => {
-          if (msg.id === messageId) {
-            return {
-              ...msg,
-              replies: [...msg.replies, reply],
-              replyCount: msg.replyCount + 1,
-              threadParticipants: [...new Set([...msg.threadParticipants, replyData.userId])]
-            };
-          }
-          return msg;
-        })
-      };
-      saveMessagesToLocalStorage(updatedMessages);
-      return updatedMessages;
-    });
-  };
+      // Load replies for each message
+      const { data: repliesData, error: repliesError } = await supabase
+        .from('messages')
+        .select(`
+          *,
+          profiles (username, avatar_url),
+          reactions (*)
+        `)
+        .eq('channel_id', channelId)
+        .not('thread_id', 'is', null)
+        .order('created_at');
 
-  const addReaction = (channelId: string, messageId: string, emoji: string, userId: string) => {
-    setMessages(prev => {
-      const channelMessages = prev[channelId] || [];
-      const updatedMessages = {
-        ...prev,
-        [channelId]: channelMessages.map(msg => {
-          if (msg.id === messageId) {
-            const existingReaction = msg.reactions.find(r => r.emoji === emoji);
-            if (existingReaction) {
-              if (!existingReaction.users.includes(userId)) {
-                return {
-                  ...msg,
-                  reactions: msg.reactions.map(r => 
-                    r.emoji === emoji 
-                      ? { ...r, users: [...r.users, userId], count: r.count + 1 }
-                      : r
-                  )
-                };
-              }
+      if (repliesError) throw repliesError;
+
+      // Process messages and replies
+      const processedMessages: Message[] = messagesData?.map(msg => {
+        const replies = repliesData?.filter(reply => reply.thread_id === msg.id) || [];
+        const processedReplies: Message[] = replies.map(reply => ({
+          id: reply.id,
+          channelId: reply.channel_id,
+          userId: reply.user_id,
+          username: reply.profiles?.username || 'Unknown User',
+          avatar: reply.profiles?.avatar_url,
+          content: reply.content,
+          timestamp: reply.created_at,
+          edited_at: reply.edited_at,
+          reactions: reply.reactions?.reduce((acc: any[], reaction: any) => {
+            const existing = acc.find(r => r.emoji === reaction.emoji);
+            if (existing) {
+              existing.users.push(reaction.user_id);
+              existing.count++;
             } else {
-              return {
-                ...msg,
-                reactions: [...msg.reactions, { emoji, users: [userId], count: 1 }]
-              };
+              acc.push({
+                emoji: reaction.emoji,
+                users: [reaction.user_id],
+                count: 1
+              });
             }
-          }
-          return msg;
-        })
-      };
-      saveMessagesToLocalStorage(updatedMessages);
-      return updatedMessages;
-    });
-  };
+            return acc;
+          }, []) || []
+        }));
 
-  const removeReaction = (channelId: string, messageId: string, emoji: string, userId: string) => {
-    setMessages(prev => {
-      const channelMessages = prev[channelId] || [];
-      const updatedMessages = {
+        return {
+          id: msg.id,
+          channelId: msg.channel_id,
+          userId: msg.user_id,
+          username: msg.profiles?.username || 'Unknown User',
+          avatar: msg.profiles?.avatar_url,
+          content: msg.content,
+          timestamp: msg.created_at,
+          edited_at: msg.edited_at,
+          replies: processedReplies,
+          replyCount: processedReplies.length,
+          threadParticipants: [...new Set(processedReplies.map(r => r.userId))],
+          reactions: msg.reactions?.reduce((acc: any[], reaction: any) => {
+            const existing = acc.find(r => r.emoji === reaction.emoji);
+            if (existing) {
+              existing.users.push(reaction.user_id);
+              existing.count++;
+            } else {
+              acc.push({
+                emoji: reaction.emoji,
+                users: [reaction.user_id],
+                count: 1
+              });
+            }
+            return acc;
+          }, []) || []
+        };
+      }) || [];
+
+      setMessages(prev => ({
         ...prev,
-        [channelId]: channelMessages.map(msg => {
-          if (msg.id === messageId) {
-            return {
-              ...msg,
-              reactions: msg.reactions.map(r => {
-                if (r.emoji === emoji && r.users.includes(userId)) {
-                  const newUsers = r.users.filter(u => u !== userId);
-                  return { ...r, users: newUsers, count: r.count - 1 };
-                }
-                return r;
-              }).filter(r => r.count > 0)
-            };
-          }
-          return msg;
-        })
-      };
-      saveMessagesToLocalStorage(updatedMessages);
-      return updatedMessages;
-    });
-  };
-
-  // Get messages for a specific channel
-  const getMessages = (channelId: string): Message[] | undefined => {
-    return messages[channelId];
-  };
-
-  // Get all messages from all public channels
-  const getAllPublicChannelMessages = () => {
-    // Create an object to hold messages by channel ID
-    const channelMessages: { [channelId: string]: Message[] } = {};
-    
-    // Get all workspace channels
-    const workspaceChannels = Object.keys(messages).filter(key => {
-      // Check if the key contains a slash (workspace/channel format)
-      if (key.includes('/')) {
-        // Filter to include only public channels (those that don't start with '@')
-        const [workspace, channel] = key.split('/');
-        return channel && !channel.startsWith('@');
-      }
-      // Include regular channels (those without workspace prefix)
-      return !key.startsWith('@');
-    });
-    
-    // Get messages from each channel and organize them by channelId
-    workspaceChannels.forEach(channelKey => {
-      if (messages[channelKey] && Array.isArray(messages[channelKey])) {
-        // Filter out any messages with invalid structure
-        const validMessages = messages[channelKey].filter(msg => 
-          msg && typeof msg === 'object' && msg.id && msg.channelId
-        );
-        
-        // Add valid messages to the channelMessages object
-        if (validMessages.length > 0) {
-          channelMessages[channelKey] = validMessages;
-        }
-      }
-    });
-    
-    return channelMessages;
-  };
-  
-  // Get thread replies for a specific message
-  const getThreadReplies = (channelId: string, parentMessageId: string) => {
-    const channelMessages = getMessages(channelId);
-    if (!channelMessages) return [];
-    
-    const parentMessage = channelMessages.find(msg => msg.id === parentMessageId);
-    if (!parentMessage) return [];
-    
-    return parentMessage.replies || [];
-  };
-
-  // Add mock thread data to channels
-  const addMockThreads = () => {
-    const result = addMockThreadsToChannels();
-    if (result.success) {
-      // Reload messages from localStorage
-      const savedMessages = loadMessagesFromLocalStorage();
-      setMessages(savedMessages);
+        [channelId]: processedMessages
+      }));
+    } catch (error) {
+      console.error('Error loading messages:', error);
     }
-    return result;
-  };
-  
-  // Add mock conversation to team channel in team01 workspace
-  const addTeamConversationData = () => {
-    const result = addTeamConversation();
-    if (result.success) {
-      // Reload messages from localStorage
-      const savedMessages = loadMessagesFromLocalStorage();
-      setMessages(savedMessages);
-    }
-    return result;
   };
 
-  // Add mock threads when the component mounts if they don't exist
+  const sendMessage = async (channelId: string, content: string, threadId?: string) => {
+    if (!user) return;
+
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .insert({
+          channel_id: channelId,
+          user_id: user.id,
+          content,
+          thread_id: threadId || null
+        });
+
+      if (error) throw error;
+
+      // Reload messages after sending
+      await loadMessages(channelId);
+    } catch (error) {
+      console.error('Error sending message:', error);
+    }
+  };
+
+  const addReaction = async (messageId: string, emoji: string) => {
+    if (!user) return;
+
+    try {
+      const { error } = await supabase
+        .from('reactions')
+        .insert({
+          message_id: messageId,
+          user_id: user.id,
+          emoji
+        });
+
+      if (error) throw error;
+
+      // Reload messages to update reactions
+      if (currentChannel) {
+        await loadMessages(currentChannel.id);
+      }
+    } catch (error) {
+      console.error('Error adding reaction:', error);
+    }
+  };
+
+  const removeReaction = async (messageId: string, emoji: string) => {
+    if (!user) return;
+
+    try {
+      const { error } = await supabase
+        .from('reactions')
+        .delete()
+        .eq('message_id', messageId)
+        .eq('user_id', user.id)
+        .eq('emoji', emoji);
+
+      if (error) throw error;
+
+      // Reload messages to update reactions
+      if (currentChannel) {
+        await loadMessages(currentChannel.id);
+      }
+    } catch (error) {
+      console.error('Error removing reaction:', error);
+    }
+  };
+
+  const createChannel = async (workspaceId: string, name: string, description?: string, type: 'public' | 'private' = 'public') => {
+    if (!user) return;
+
+    try {
+      const { error } = await supabase
+        .from('channels')
+        .insert({
+          workspace_id: workspaceId,
+          name,
+          description,
+          type,
+          created_by: user.id
+        });
+
+      if (error) throw error;
+
+      // Reload channels
+      await loadChannels(workspaceId);
+    } catch (error) {
+      console.error('Error creating channel:', error);
+    }
+  };
+
+  const joinWorkspace = async (workspaceId: string) => {
+    if (!user) return;
+
+    try {
+      const { error } = await supabase
+        .from('workspace_members')
+        .insert({
+          workspace_id: workspaceId,
+          user_id: user.id,
+          role: 'member'
+        });
+
+      if (error) throw error;
+
+      // Reload workspaces
+      await loadWorkspaces();
+    } catch (error) {
+      console.error('Error joining workspace:', error);
+    }
+  };
+
+  // Set up real-time subscriptions
   useEffect(() => {
-    // Check if general channel has any threads
-    const generalMessages = messages['general'] || [];
-    const hasThreads = generalMessages.some(msg => msg.replyCount > 0);
-    
-    if (!hasThreads && generalMessages.length > 0) {
-      addMockThreads();
-    }
-    
-    // Check if team channel in team01 workspace has any messages
-    const teamChannelKey = 'team01/team';
-    const teamMessages = messages[teamChannelKey] || [];
-    
-    if (teamMessages.length === 0) {
-      // Add mock conversation to team channel
-      addTeamConversation();
-      // Reload messages from localStorage
-      const savedMessages = loadMessagesFromLocalStorage();
-      setMessages(savedMessages);
-    }
-  }, []);
+    if (!user || !currentChannel) return;
 
-  // Pin a message
-  const pinMessage = (channelId: string, messageId: string) => {
-    setMessages(prev => {
-      const channelMessages = prev[channelId] || [];
-      const updatedMessages = {
-        ...prev,
-        [channelId]: channelMessages.map(msg => {
-          if (msg.id === messageId) {
-            return { ...msg, isPinned: true };
-          }
-          return msg;
-        })
-      };
-      saveMessagesToLocalStorage(updatedMessages);
-      return updatedMessages;
-    });
-  };
+    const messagesSubscription = supabase
+      .channel(`messages:${currentChannel.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'messages',
+          filter: `channel_id=eq.${currentChannel.id}`
+        },
+        () => {
+          loadMessages(currentChannel.id);
+        }
+      )
+      .subscribe();
 
-  // Unpin a message
-  const unpinMessage = (channelId: string, messageId: string) => {
-    setMessages(prev => {
-      const channelMessages = prev[channelId] || [];
-      const updatedMessages = {
-        ...prev,
-        [channelId]: channelMessages.map(msg => {
-          if (msg.id === messageId) {
-            return { ...msg, isPinned: false };
-          }
-          return msg;
-        })
-      };
-      saveMessagesToLocalStorage(updatedMessages);
-      return updatedMessages;
-    });
-  };
+    const reactionsSubscription = supabase
+      .channel(`reactions:${currentChannel.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'reactions'
+        },
+        () => {
+          loadMessages(currentChannel.id);
+        }
+      )
+      .subscribe();
 
-  // Get pinned messages for a channel
-  const getPinnedMessages = (channelId: string): Message[] => {
-    const channelMessages = messages[channelId] || [];
-    return channelMessages.filter(msg => msg.isPinned);
-  };
-
-  // Add a document to a channel
-  const addDocument = (channelId: string, documentData: Omit<Document, 'id'>) => {
-    const newDocument: Document = {
-      ...documentData,
-      id: `doc-${Date.now()}-${Math.random()}`
+    return () => {
+      supabase.removeChannel(messagesSubscription);
+      supabase.removeChannel(reactionsSubscription);
     };
+  }, [user, currentChannel]);
 
-    setDocuments(prev => {
-      const updatedDocuments = {
-        ...prev,
-        [channelId]: [...(prev[channelId] || []), newDocument]
-      };
-      saveDocumentsToLocalStorage(updatedDocuments);
-      return updatedDocuments;
-    });
-  };
+  // Load workspaces when user changes
+  useEffect(() => {
+    if (user) {
+      loadWorkspaces();
+    } else {
+      setWorkspaces([]);
+      setChannels([]);
+      setMessages({});
+      setCurrentWorkspace(null);
+      setCurrentChannel(null);
+    }
+  }, [user]);
 
-  // Get documents for a channel
-  const getDocuments = (channelId: string): Document[] => {
-    return documents[channelId] || [];
-  };
+  // Load channels when workspace changes
+  useEffect(() => {
+    if (currentWorkspace) {
+      loadChannels(currentWorkspace.id);
+    } else {
+      setChannels([]);
+      setCurrentChannel(null);
+    }
+  }, [currentWorkspace]);
 
-  // Get pinned documents for a channel
-  const getPinnedDocuments = (channelId: string): Document[] => {
-    const channelDocuments = documents[channelId] || [];
-    return channelDocuments.filter(doc => doc.isPinned);
-  };
-
-  // Pin a document
-  const pinDocument = (channelId: string, documentId: string) => {
-    setDocuments(prev => {
-      const channelDocuments = prev[channelId] || [];
-      const updatedDocuments = {
-        ...prev,
-        [channelId]: channelDocuments.map(doc => {
-          if (doc.id === documentId) {
-            return { ...doc, isPinned: true };
-          }
-          return doc;
-        })
-      };
-      saveDocumentsToLocalStorage(updatedDocuments);
-      return updatedDocuments;
-    });
-  };
-
-  // Unpin a document
-  const unpinDocument = (channelId: string, documentId: string) => {
-    setDocuments(prev => {
-      const channelDocuments = prev[channelId] || [];
-      const updatedDocuments = {
-        ...prev,
-        [channelId]: channelDocuments.map(doc => {
-          if (doc.id === documentId) {
-            return { ...doc, isPinned: false };
-          }
-          return doc;
-        })
-      };
-      saveDocumentsToLocalStorage(updatedDocuments);
-      return updatedDocuments;
-    });
-  };
-
-  // Check if a channel is private
-  const isPrivateChannel = (channelId: string): boolean => {
-    // Private channels start with '@' or have 'private' in their name
-    return channelId.startsWith('@') || channelId.includes('private');
-  };
+  // Load messages when channel changes
+  useEffect(() => {
+    if (currentChannel) {
+      loadMessages(currentChannel.id);
+    }
+  }, [currentChannel]);
 
   return (
-    <MessageContext.Provider value={{
-      messages,
-      documents,
-      addMessage,
-      addReply,
-      selectedThread,
-      setSelectedThread,
-      getMessages,
-      getAllPublicChannelMessages,
-      getThreadReplies,
-      addMockThreads,
-      loadMessagesFromLocalStorage,
-      addTeamConversationData,
-      pinMessage,
-      unpinMessage,
-      getPinnedMessages,
-      addDocument,
-      getDocuments,
-      getPinnedDocuments,
-      pinDocument,
-      unpinDocument,
-      isPrivateChannel
-    }}>
+    <MessageContext.Provider
+      value={{
+        messages,
+        channels,
+        workspaces,
+        currentWorkspace,
+        currentChannel,
+        sendMessage,
+        addReaction,
+        removeReaction,
+        setCurrentWorkspace,
+        setCurrentChannel,
+        loadWorkspaces,
+        loadChannels,
+        loadMessages,
+        createChannel,
+        joinWorkspace
+      }}
+    >
       {children}
     </MessageContext.Provider>
   );
+};
+
+export const useMessages = () => {
+  const context = useContext(MessageContext);
+  if (context === undefined) {
+    throw new Error('useMessages must be used within a MessageProvider');
+  }
+  return context;
 };

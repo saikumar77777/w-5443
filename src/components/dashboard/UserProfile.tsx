@@ -18,19 +18,19 @@ import {
   Edit3,
   Camera
 } from 'lucide-react';
-import { User, useAuth } from '@/contexts/AuthContext';
+import { ExtendedUser, useAuth } from '@/contexts/AuthContext';
 import { UserAvatar } from '@/components/ui/user-avatar';
 
 interface UserProfileProps {
-  user: User | null;
+  user: ExtendedUser | null;
   onClose: () => void;
 }
 
 const UserProfile: React.FC<UserProfileProps> = ({ user, onClose }) => {
   const { logout, updateUserStatus, updateUserPresence } = useAuth();
   const [isEditingStatus, setIsEditingStatus] = useState(false);
-  const [statusText, setStatusText] = useState(user?.status.text || '');
-  const [statusEmoji, setStatusEmoji] = useState(user?.status.emoji || '😀');
+  const [statusText, setStatusText] = useState(user?.status?.text || '');
+  const [statusEmoji, setStatusEmoji] = useState(user?.status?.emoji || '😀');
 
   const handleStatusSave = () => {
     updateUserStatus({
@@ -160,7 +160,7 @@ const UserProfile: React.FC<UserProfileProps> = ({ user, onClose }) => {
             ) : (
               <div className="p-3 bg-gray-700 rounded-lg">
                 <p className="text-sm text-white">
-                  {user?.status.emoji} {user?.status.text || 'No status set'}
+                  {user?.status?.emoji} {user?.status?.text || 'No status set'}
                 </p>
               </div>
             )}

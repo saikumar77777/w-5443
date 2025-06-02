@@ -9,17 +9,25 @@ import {
   Settings,
   Bell
 } from 'lucide-react';
-import { User, Workspace } from '@/contexts/AuthContext';
-import test01Data from '@/data/test01-workspace';
+import { ExtendedUser, Workspace } from '@/contexts/AuthContext';
 import { UserAvatar } from '@/components/ui/user-avatar';
 
 interface DMSidebarProps {
-  user: User | null;
+  user: ExtendedUser | null;
   workspace: Workspace | null;
   onUserSelect: (userId: string) => void;
   onBackClick: () => void;
   selectedDM: string;
 }
+
+// Mock workspace participants
+const mockWorkspaceParticipants = [
+  { id: 'dm-1', name: 'Sarah Wilson', presence: 'active', avatar: 'SW' },
+  { id: 'dm-2', name: 'Mike Chen', presence: 'away', avatar: 'MC' },
+  { id: 'dm-3', name: 'Emma Davis', presence: 'offline', avatar: 'ED' },
+  { id: 'dm-4', name: 'John Smith', presence: 'active', avatar: 'JS' },
+  { id: 'dm-5', name: 'Lisa Brown', presence: 'dnd', avatar: 'LB' },
+];
 
 const DMSidebar: React.FC<DMSidebarProps> = ({
   user,
@@ -29,21 +37,13 @@ const DMSidebar: React.FC<DMSidebarProps> = ({
   selectedDM
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-
-  // Use Test01 workspace participants when workspace id is 3
-  const [workspaceMembers, setWorkspaceMembers] = useState([
-    { id: 'dm-1', name: 'Sarah Wilson', presence: 'active', avatar: 'SW' },
-    { id: 'dm-2', name: 'Mike Chen', presence: 'away', avatar: 'MC' },
-    { id: 'dm-3', name: 'Emma Davis', presence: 'offline', avatar: 'ED' },
-    { id: 'dm-4', name: 'John Smith', presence: 'active', avatar: 'JS' },
-    { id: 'dm-5', name: 'Lisa Brown', presence: 'dnd', avatar: 'LB' },
-  ]);
+  const [workspaceMembers, setWorkspaceMembers] = useState(mockWorkspaceParticipants);
   
   // Update members when workspace changes
   useEffect(() => {
     if (workspace?.id === '3') {
-      // Use Test01 workspace participants
-      setWorkspaceMembers(test01Data.participants);
+      // Use Test01 workspace participants from mock data
+      setWorkspaceMembers(mockWorkspaceParticipants);
     }
   }, [workspace?.id]);
 

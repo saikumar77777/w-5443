@@ -15,7 +15,7 @@ import {
   FileDown
 } from 'lucide-react';
 import { downloadMeetingNotes } from '@/utils/meetingNotesGenerator';
-import { User } from '@/contexts/AuthContext';
+import { ExtendedUser } from '@/contexts/AuthContext';
 import { useMessages } from '@/contexts/MessageContext';
 import MessageBubble from './MessageBubble';
 import MessageInput from './MessageInput';
@@ -33,7 +33,7 @@ interface Channel {
 
 interface ChatAreaProps {
   channel: string;
-  user: User | null;
+  user: ExtendedUser | null;
   channels?: Channel[];
 }
 
@@ -83,8 +83,17 @@ const ChatArea: React.FC<ChatAreaProps> = ({ channel, user, channels = [] }) => 
     const currentMessage = channelMessages[messageIndex];
     const previousMessage = channelMessages[messageIndex - 1];
     
+    // Ensure timestamps are Date objects
+    const currentTime = currentMessage.timestamp instanceof Date 
+      ? currentMessage.timestamp.getTime() 
+      : new Date(currentMessage.timestamp).getTime();
+    
+    const previousTime = previousMessage.timestamp instanceof Date
+      ? previousMessage.timestamp.getTime()
+      : new Date(previousMessage.timestamp).getTime();
+    
     // Show avatar if different user or time gap > 5 minutes
-    const timeDiff = currentMessage.timestamp.getTime() - previousMessage.timestamp.getTime();
+    const timeDiff = currentTime - previousTime;
     return currentMessage.userId !== previousMessage.userId || timeDiff > 5 * 60 * 1000;
   };
 
@@ -93,8 +102,17 @@ const ChatArea: React.FC<ChatAreaProps> = ({ channel, user, channels = [] }) => 
     const currentMessage = channelMessages[messageIndex];
     const previousMessage = channelMessages[messageIndex - 1];
     
+    // Ensure timestamps are Date objects
+    const currentTime = currentMessage.timestamp instanceof Date 
+      ? currentMessage.timestamp.getTime() 
+      : new Date(currentMessage.timestamp).getTime();
+    
+    const previousTime = previousMessage.timestamp instanceof Date
+      ? previousMessage.timestamp.getTime()
+      : new Date(previousMessage.timestamp).getTime();
+    
     // Group if same user and within 5 minutes
-    const timeDiff = currentMessage.timestamp.getTime() - previousMessage.timestamp.getTime();
+    const timeDiff = currentTime - previousTime;
     return currentMessage.userId === previousMessage.userId && timeDiff <= 5 * 60 * 1000;
   };
 

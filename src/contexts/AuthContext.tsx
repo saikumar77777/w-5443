@@ -3,7 +3,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { User, AuthError } from '@supabase/supabase-js';
 
-interface Profile {
+export interface Profile {
   id: string;
   username: string;
   full_name?: string;
@@ -13,28 +13,53 @@ interface Profile {
   timezone?: string;
 }
 
+export interface Workspace {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string;
+  logo_url?: string;
+  owner_id: string;
+  created_at: string;
+  updated_at: string;
+  url?: string; // For compatibility with existing components
+}
+
+// Extend User type to include displayName for compatibility
+export interface ExtendedUser extends User {
+  displayName?: string;
+}
+
 interface AuthContextType {
-  user: User | null;
+  user: ExtendedUser | null;
   profile: Profile | null;
+  workspace: Workspace | null;
   loading: boolean;
   signUp: (email: string, password: string, userData?: any) => Promise<{ error: AuthError | null }>;
   signIn: (email: string, password: string) => Promise<{ error: AuthError | null }>;
   signOut: () => Promise<void>;
+  logout: () => Promise<void>;
   updateProfile: (updates: Partial<Profile>) => Promise<void>;
+  setCurrentWorkspace: (workspace: Workspace | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<ExtendedUser | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
       if (session?.user) {
+        const extendedUser = {
+          ...session.user,
+          displayName: session.user.user_metadata?.username || session.user.email?.split('@')[0] || 'Unknown User'
+        };
+        setUser(extendedUser);
         loadProfile(session.user.id);
       }
       setLoading(false);
@@ -44,11 +69,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
-      setUser(session?.user ?? null);
       if (session?.user) {
+        const extendedUser = {
+          ...session.user,
+          displayName: session.user.user_metadata?.username || session.user.email?.split('@')[0] || 'Unknown User'
+        };
+        setUser(extendedUser);
         await loadProfile(session.user.id);
       } else {
+        setUser(null);
         setProfile(null);
+        setWorkspace(null);
       }
       setLoading(false);
     });
@@ -66,6 +97,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (error) throw error;
       setProfile(data);
+
+      // Load user's workspaces and set the first one as current
+      const { data: workspaceData, error: workspaceError } = await supabase
+        .from('workspace_members')
+        .select(`
+          workspace_id,
+          workspaces (
+            id,
+            name,
+            slug,
+            description,
+            logo_url,
+            owner_id,
+            created_at,
+            updated_at
+          )
+        `)
+        .eq('user_id', userId)
+        .limit(1);
+
+      if (!workspaceError && workspaceData && workspaceData.length > 0) {
+        const workspace = workspaceData[0].workspaces as any;
+        setWorkspace({
+          ...workspace,
+          url: workspace.slug // Add url property for compatibility
+        });
+      }
     } catch (error) {
       console.error('Error loading profile:', error);
     }
@@ -76,7 +134,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       email,
       password,
       options: {
-        data: userData
+        data: userData,
+        emailRedirectTo: `${window.location.origin}/`
       }
     });
     return { error };
@@ -92,6 +151,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signOut = async () => {
     await supabase.auth.signOut();
+    setUser(null);
+    setProfile(null);
+    setWorkspace(null);
+  };
+
+  const logout = async () => {
+    await signOut();
   };
 
   const updateProfile = async (updates: Partial<Profile>) => {
@@ -112,14 +178,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const setCurrentWorkspace = (newWorkspace: Workspace | null) => {
+    setWorkspace(newWorkspace);
+  };
+
   const value = {
     user,
     profile,
+    workspace,
     loading,
     signUp,
     signIn,
     signOut,
+    logout,
     updateProfile,
+    setCurrentWorkspace,
   };
 
   return (
@@ -136,3 +209,6 @@ export const useAuth = () => {
   }
   return context;
 };
+
+// Export User type for compatibility
+export type { User };

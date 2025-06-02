@@ -25,8 +25,8 @@ const InviteTeammatesModal: React.FC<InviteTeammatesModalProps> = ({
   const [copiedCode, setCopiedCode] = useState(false);
 
   // Generate invite URL and code based on workspace
-  const inviteUrl = `https://${workspace?.url}.slack.com/signup`;
-  const inviteCode = `${workspace?.url?.toUpperCase()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+  const inviteUrl = `https://${workspace?.slug || 'my-workspace'}.slack.com/signup`;
+  const inviteCode = `${workspace?.slug?.toUpperCase() || 'WORKSPACE'}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
   const copyToClipboard = async (text: string, type: 'url' | 'code') => {
     try {
@@ -48,7 +48,7 @@ const InviteTeammatesModal: React.FC<InviteTeammatesModalProps> = ({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-lg font-bold text-slack-text-primary">
-            Invite teammates to {workspace?.name}
+            Invite teammates to {workspace?.name || 'your workspace'}
           </DialogTitle>
         </DialogHeader>
         
@@ -108,7 +108,7 @@ const InviteTeammatesModal: React.FC<InviteTeammatesModalProps> = ({
           <div className="bg-slack-light-gray p-4 rounded-slack-md">
             <p className="text-sm text-slack-text-secondary">
               Share the URL or code with your teammates. They can use either to join your{' '}
-              <span className="font-medium">{workspace?.name}</span> workspace.
+              <span className="font-medium">{workspace?.name || 'workspace'}</span> workspace.
             </p>
           </div>
 

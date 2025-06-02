@@ -10,7 +10,7 @@ export interface Message {
   username: string;
   avatar?: string;
   content: string;
-  timestamp: string;
+  timestamp: Date;
   reactions?: Array<{
     emoji: string;
     users: string[];
@@ -20,6 +20,8 @@ export interface Message {
   replyCount?: number;
   threadParticipants?: string[];
   edited_at?: string;
+  edited?: boolean;
+  isPinned?: boolean;
 }
 
 export interface Channel {
@@ -50,16 +52,27 @@ interface MessageContextType {
   workspaces: Workspace[];
   currentWorkspace: Workspace | null;
   currentChannel: Channel | null;
+  selectedThread: Message | null;
   sendMessage: (channelId: string, content: string, threadId?: string) => Promise<void>;
+  addMessage: (channelId: string, messageData: any) => void;
+  addReply: (channelId: string, parentId: string, messageData: any) => void;
   addReaction: (messageId: string, emoji: string) => Promise<void>;
   removeReaction: (messageId: string, emoji: string) => Promise<void>;
   setCurrentWorkspace: (workspace: Workspace | null) => void;
   setCurrentChannel: (channel: Channel | null) => void;
+  setSelectedThread: (message: Message | null) => void;
   loadWorkspaces: () => Promise<void>;
   loadChannels: (workspaceId: string) => Promise<void>;
   loadMessages: (channelId: string) => Promise<void>;
   createChannel: (workspaceId: string, name: string, description?: string, type?: 'public' | 'private') => Promise<void>;
   joinWorkspace: (workspaceId: string) => Promise<void>;
+  getMessages: (channelId: string) => Message[] | undefined;
+  getThreadReplies: (channelId: string, parentId: string) => Message[] | undefined;
+  getAllPublicChannelMessages: () => { [channelId: string]: Message[] };
+  pinMessage: (messageId: string) => Promise<void>;
+  unpinMessage: (messageId: string) => Promise<void>;
+  getPinnedMessages: (channelId: string) => Message[];
+  addDocument: (channelId: string, document: any) => void;
 }
 
 const MessageContext = createContext<MessageContextType | undefined>(undefined);
@@ -70,6 +83,7 @@ export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [currentWorkspace, setCurrentWorkspace] = useState<Workspace | null>(null);
   const [currentChannel, setCurrentChannel] = useState<Channel | null>(null);
+  const [selectedThread, setSelectedThread] = useState<Message | null>(null);
   const { user } = useAuth();
 
   const loadWorkspaces = async () => {
@@ -166,8 +180,9 @@ export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children })
           username: reply.profiles?.username || 'Unknown User',
           avatar: reply.profiles?.avatar_url,
           content: reply.content,
-          timestamp: reply.created_at,
+          timestamp: new Date(reply.created_at),
           edited_at: reply.edited_at,
+          edited: Boolean(reply.edited_at),
           reactions: reply.reactions?.reduce((acc: any[], reaction: any) => {
             const existing = acc.find(r => r.emoji === reaction.emoji);
             if (existing) {
@@ -191,11 +206,13 @@ export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children })
           username: msg.profiles?.username || 'Unknown User',
           avatar: msg.profiles?.avatar_url,
           content: msg.content,
-          timestamp: msg.created_at,
+          timestamp: new Date(msg.created_at),
           edited_at: msg.edited_at,
+          edited: Boolean(msg.edited_at),
           replies: processedReplies,
           replyCount: processedReplies.length,
           threadParticipants: [...new Set(processedReplies.map(r => r.userId))],
+          isPinned: false, // Add this when we implement pinning
           reactions: msg.reactions?.reduce((acc: any[], reaction: any) => {
             const existing = acc.find(r => r.emoji === reaction.emoji);
             if (existing) {
@@ -242,6 +259,60 @@ export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children })
     } catch (error) {
       console.error('Error sending message:', error);
     }
+  };
+
+  const addMessage = (channelId: string, messageData: any) => {
+    const newMessage: Message = {
+      id: messageData.id || Date.now().toString(),
+      channelId,
+      userId: messageData.userId,
+      username: messageData.username,
+      avatar: messageData.avatar,
+      content: messageData.content,
+      timestamp: new Date(),
+      reactions: [],
+      replies: [],
+      replyCount: 0,
+      threadParticipants: []
+    };
+
+    setMessages(prev => ({
+      ...prev,
+      [channelId]: [...(prev[channelId] || []), newMessage]
+    }));
+  };
+
+  const addReply = (channelId: string, parentId: string, messageData: any) => {
+    const newReply: Message = {
+      id: messageData.id || Date.now().toString(),
+      channelId,
+      userId: messageData.userId,
+      username: messageData.username,
+      avatar: messageData.avatar,
+      content: messageData.content,
+      timestamp: new Date(),
+      reactions: []
+    };
+
+    setMessages(prev => {
+      const channelMessages = prev[channelId] || [];
+      const updatedMessages = channelMessages.map(msg => {
+        if (msg.id === parentId) {
+          return {
+            ...msg,
+            replies: [...(msg.replies || []), newReply],
+            replyCount: (msg.replyCount || 0) + 1,
+            threadParticipants: [...new Set([...(msg.threadParticipants || []), messageData.userId])]
+          };
+        }
+        return msg;
+      });
+
+      return {
+        ...prev,
+        [channelId]: updatedMessages
+      };
+    });
   };
 
   const addReaction = async (messageId: string, emoji: string) => {
@@ -333,6 +404,40 @@ export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children })
     }
   };
 
+  const getMessages = (channelId: string) => {
+    return messages[channelId];
+  };
+
+  const getThreadReplies = (channelId: string, parentId: string) => {
+    const channelMessages = messages[channelId] || [];
+    const parentMessage = channelMessages.find(msg => msg.id === parentId);
+    return parentMessage?.replies;
+  };
+
+  const getAllPublicChannelMessages = () => {
+    return messages;
+  };
+
+  const pinMessage = async (messageId: string) => {
+    // TODO: Implement pinning functionality
+    console.log('Pinning message:', messageId);
+  };
+
+  const unpinMessage = async (messageId: string) => {
+    // TODO: Implement unpinning functionality
+    console.log('Unpinning message:', messageId);
+  };
+
+  const getPinnedMessages = (channelId: string) => {
+    // TODO: Implement getting pinned messages
+    return [];
+  };
+
+  const addDocument = (channelId: string, document: any) => {
+    // TODO: Implement document functionality
+    console.log('Adding document to channel:', channelId, document);
+  };
+
   // Set up real-time subscriptions
   useEffect(() => {
     if (!user || !currentChannel) return;
@@ -384,6 +489,7 @@ export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children })
       setMessages({});
       setCurrentWorkspace(null);
       setCurrentChannel(null);
+      setSelectedThread(null);
     }
   }, [user]);
 
@@ -412,16 +518,27 @@ export const MessageProvider: React.FC<{ children: ReactNode }> = ({ children })
         workspaces,
         currentWorkspace,
         currentChannel,
+        selectedThread,
         sendMessage,
+        addMessage,
+        addReply,
         addReaction,
         removeReaction,
         setCurrentWorkspace,
         setCurrentChannel,
+        setSelectedThread,
         loadWorkspaces,
         loadChannels,
         loadMessages,
         createChannel,
-        joinWorkspace
+        joinWorkspace,
+        getMessages,
+        getThreadReplies,
+        getAllPublicChannelMessages,
+        pinMessage,
+        unpinMessage,
+        getPinnedMessages,
+        addDocument
       }}
     >
       {children}
